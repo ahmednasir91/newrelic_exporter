@@ -20,31 +20,31 @@ import (
 	"github.com/prometheus/log"
 )
 
-// Chunk size of metric requests
+// ChunkSize of metric requests
 const ChunkSize = 10
 
 // Namespace for metrics
-const NameSpace = "newrelic"
+const Namespace = "newrelic"
 
-// User-Agent string
+// UserAgent string
 const UserAgent = "NewRelic Exporter"
 
 // Regular expression to parse Link headers
 var rexp = `<([[:graph:]]+)>; rel="next"`
-var LinkRexp *regexp.Regexp
+var linkRegexp *regexp.Regexp
 
 func init() {
-	LinkRexp = regexp.MustCompile(rexp)
+	linkRegexp = regexp.MustCompile(rexp)
 }
 
-type Metric struct {
+type metric struct {
 	App   string
 	Name  string
 	Value float64
 	Label string
 }
 
-type AppList struct {
+type appList struct {
 	Applications []struct {
 		ID         int
 		Name       string
@@ -54,7 +54,7 @@ type AppList struct {
 	}
 }
 
-func (a *AppList) get(api *newRelicAPI) error {
+func (a *appList) get(api *newRelicAPI) error {
 	log.Debugf("Requesting application list from %s.", api.server.String())
 	body, err := api.req("/v2/applications.json", "")
 	if err != nil {
@@ -65,7 +65,7 @@ func (a *AppList) get(api *newRelicAPI) error {
 	dec := json.NewDecoder(bytes.NewReader(body))
 	for {
 
-		page := new(AppList)
+		page := new(appList)
 		if err := dec.Decode(page); err == io.EOF {
 			break
 		} else if err != nil {
@@ -80,10 +80,10 @@ func (a *AppList) get(api *newRelicAPI) error {
 	return nil
 }
 
-func (a *AppList) sendMetrics(ch chan<- Metric) {
+func (a *appList) sendMetrics(ch chan<- metric) {
 	for _, app := range a.Applications {
 		for name, value := range app.AppSummary {
-			ch <- Metric{
+			ch <- metric{
 				App:   app.Name,
 				Name:  name,
 				Value: value,
@@ -92,7 +92,7 @@ func (a *AppList) sendMetrics(ch chan<- Metric) {
 		}
 
 		for name, value := range app.UsrSummary {
-			ch <- Metric{
+			ch <- metric{
 				App:   app.Name,
 				Name:  name,
 				Value: value,
@@ -102,14 +102,14 @@ func (a *AppList) sendMetrics(ch chan<- Metric) {
 	}
 }
 
-type MetricNames struct {
+type metricNames struct {
 	Metrics []struct {
 		Name   string
 		Values []string
 	}
 }
 
-func (m *MetricNames) get(api *newRelicAPI, appID int) error {
+func (m *metricNames) get(api *newRelicAPI, appID int) error {
 	log.Debugf("Requesting metrics names for application id %d.", appID)
 	path := fmt.Sprintf("/v2/applications/%s/metrics.json", strconv.Itoa(appID))
 
@@ -122,7 +122,7 @@ func (m *MetricNames) get(api *newRelicAPI, appID int) error {
 	dec := json.NewDecoder(bytes.NewReader(body))
 
 	for {
-		var part MetricNames
+		var part metricNames
 		if err = dec.Decode(&part); err == io.EOF {
 			break
 		} else if err != nil {
@@ -136,8 +136,8 @@ func (m *MetricNames) get(api *newRelicAPI, appID int) error {
 	return nil
 }
 
-type MetricData struct {
-	Metric_Data struct {
+type metricData struct {
+	metricData struct {
 		Metrics []struct {
 			Name       string
 			Timeslices []struct {
@@ -147,7 +147,7 @@ type MetricData struct {
 	}
 }
 
-func (m *MetricData) get(api *newRelicAPI, appID int, names MetricNames) error {
+func (m *metricData) get(api *newRelicAPI, appID int, names metricNames) error {
 	path := fmt.Sprintf("/v2/applications/%s/metrics/data.json", strconv.Itoa(appID))
 
 	var nameList []string
@@ -164,11 +164,11 @@ func (m *MetricData) get(api *newRelicAPI, appID int, names MetricNames) error {
 	// we have to process this in chunks, to ensure the response
 	// fits within a single request.
 
-	chans := make([]chan MetricData, 0)
+	chans := make([]chan metricData, 0)
 
 	for i := 0; i < len(nameList); i += ChunkSize {
 
-		chans = append(chans, make(chan MetricData))
+		chans = append(chans, make(chan metricData))
 
 		var thisList []string
 
@@ -178,9 +178,9 @@ func (m *MetricData) get(api *newRelicAPI, appID int, names MetricNames) error {
 			thisList = nameList[i : i+ChunkSize]
 		}
 
-		go func(names []string, ch chan<- MetricData) {
+		go func(names []string, ch chan<- metricData) {
 
-			var data MetricData
+			var data metricData
 
 			params := url.Values{}
 
@@ -204,7 +204,7 @@ func (m *MetricData) get(api *newRelicAPI, appID int, names MetricNames) error {
 			dec := json.NewDecoder(bytes.NewReader(body))
 			for {
 
-				page := new(MetricData)
+				page := new(metricData)
 				if err := dec.Decode(page); err == io.EOF {
 					break
 				} else if err != nil {
@@ -213,7 +213,7 @@ func (m *MetricData) get(api *newRelicAPI, appID int, names MetricNames) error {
 					return
 				}
 
-				data.Metric_Data.Metrics = append(data.Metric_Data.Metrics, page.Metric_Data.Metrics...)
+				data.metricData.Metrics = append(data.metricData.Metrics, page.metricData.Metrics...)
 
 			}
 
@@ -224,19 +224,19 @@ func (m *MetricData) get(api *newRelicAPI, appID int, names MetricNames) error {
 
 	}
 
-	allData := m.Metric_Data.Metrics
+	allData := m.metricData.Metrics
 
 	for _, ch := range chans {
 		m := <-ch
-		allData = append(allData, m.Metric_Data.Metrics...)
+		allData = append(allData, m.metricData.Metrics...)
 	}
-	m.Metric_Data.Metrics = allData
+	m.metricData.Metrics = allData
 
 	return nil
 }
 
-func (m *MetricData) sendMetrics(ch chan<- Metric, app string) {
-	for _, set := range m.Metric_Data.Metrics {
+func (m *metricData) sendMetrics(ch chan<- metric, app string) {
+	for _, set := range m.metricData.Metrics {
 
 		if len(set.Timeslices) == 0 {
 			continue
@@ -247,7 +247,7 @@ func (m *MetricData) sendMetrics(ch chan<- Metric, app string) {
 
 			if v, ok := value.(float64); ok {
 
-				ch <- Metric{
+				ch <- metric{
 					App:   app,
 					Name:  name,
 					Value: v,
@@ -260,7 +260,7 @@ func (m *MetricData) sendMetrics(ch chan<- Metric, app string) {
 	}
 }
 
-type Exporter struct {
+type exporter struct {
 	mu              sync.Mutex
 	duration, error prometheus.Gauge
 	totalScrapes    prometheus.Counter
@@ -268,20 +268,20 @@ type Exporter struct {
 	api             *newRelicAPI
 }
 
-func NewExporter() *Exporter {
-	return &Exporter{
+func newExporter() *exporter {
+	return &exporter{
 		duration: prometheus.NewGauge(prometheus.GaugeOpts{
-			Namespace: NameSpace,
+			Namespace: Namespace,
 			Name:      "exporter_last_scrape_duration_seconds",
 			Help:      "The last scrape duration.",
 		}),
 		totalScrapes: prometheus.NewCounter(prometheus.CounterOpts{
-			Namespace: NameSpace,
+			Namespace: Namespace,
 			Name:      "exporter_scrapes_total",
 			Help:      "Total scraped metrics",
 		}),
 		error: prometheus.NewGauge(prometheus.GaugeOpts{
-			Namespace: NameSpace,
+			Namespace: Namespace,
 			Name:      "exporter_last_scrape_error",
 			Help:      "The last scrape error status.",
 		}),
@@ -289,7 +289,7 @@ func NewExporter() *Exporter {
 	}
 }
 
-func (e *Exporter) scrape(ch chan<- Metric) {
+func (e *exporter) scrape(ch chan<- metric) {
 
 	e.error.Set(0)
 	e.totalScrapes.Inc()
@@ -297,7 +297,7 @@ func (e *Exporter) scrape(ch chan<- Metric) {
 	now := time.Now().UnixNano()
 	log.Debugf("Starting new scrape at %d.", now)
 
-	var apps AppList
+	var apps appList
 	err := apps.get(e.api)
 	if err != nil {
 		log.Error(err)
@@ -318,7 +318,7 @@ func (e *Exporter) scrape(ch chan<- Metric) {
 		go func() {
 
 			defer wg.Done()
-			var names MetricNames
+			var names metricNames
 
 			err = names.get(api, app.ID)
 			if err != nil {
@@ -326,7 +326,7 @@ func (e *Exporter) scrape(ch chan<- Metric) {
 				e.error.Set(1)
 			}
 
-			var data MetricData
+			var data metricData
 
 			err = data.get(api, app.ID, names)
 			if err != nil {
@@ -346,17 +346,17 @@ func (e *Exporter) scrape(ch chan<- Metric) {
 	e.duration.Set(float64(time.Now().UnixNano()-now) / 1000000000)
 }
 
-func (e *Exporter) recieve(ch <-chan Metric) {
+func (e *exporter) recieve(ch <-chan metric) {
 
 	for metric := range ch {
-		id := fmt.Sprintf("%s_%s", NameSpace, metric.Name)
+		id := fmt.Sprintf("%s_%s", Namespace, metric.Name)
 
 		if m, ok := e.metrics[id]; ok {
 			m.WithLabelValues(metric.App, metric.Label).Set(metric.Value)
 		} else {
 			g := prometheus.NewGaugeVec(
 				prometheus.GaugeOpts{
-					Namespace: NameSpace,
+					Namespace: Namespace,
 					Name:      metric.Name,
 				},
 				[]string{"app", "component"})
@@ -366,7 +366,7 @@ func (e *Exporter) recieve(ch <-chan Metric) {
 	}
 }
 
-func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
+func (e *exporter) Describe(ch chan<- *prometheus.Desc) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -379,7 +379,7 @@ func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
 	ch <- e.error.Desc()
 }
 
-func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
+func (e *exporter) Collect(ch chan<- prometheus.Metric) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -389,7 +389,7 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	e.api.to = time.Now().Add(-time.Second * 30).Round(time.Minute).UTC()
 	e.api.from = e.api.to.Add(-time.Duration(e.api.period) * time.Second)
 
-	metricChan := make(chan Metric)
+	metricChan := make(chan metric)
 
 	go e.scrape(metricChan)
 
@@ -415,7 +415,7 @@ type newRelicAPI struct {
 	client          *http.Client
 }
 
-func NewNewRelicAPI(server string, apikey string, timeout time.Duration) *newRelicAPI {
+func newNewRelicAPI(server string, apikey string, timeout time.Duration) *newRelicAPI {
 	parsed, err := url.Parse(server)
 	if err != nil {
 		log.Fatal("Could not parse API URL: ", err)
@@ -469,7 +469,7 @@ func (a *newRelicAPI) httpget(req *http.Request, in []byte) (out []byte, err err
 
 	// Read the link header to see if we need to read more pages.
 	link := resp.Header.Get("Link")
-	vals := LinkRexp.FindStringSubmatch(link)
+	vals := linkRegexp.FindStringSubmatch(link)
 
 	if len(vals) == 2 {
 		// Regexp matched, read get next page
@@ -486,6 +486,7 @@ func (a *newRelicAPI) httpget(req *http.Request, in []byte) (out []byte, err err
 	return
 }
 
+// Entry point
 func main() {
 	var server, apikey, listenAddress, metricPath string
 	var period int
@@ -502,23 +503,22 @@ func main() {
 
 	flag.Parse()
 
-	api := NewNewRelicAPI(server, apikey, timeout)
+	api := newNewRelicAPI(server, apikey, timeout)
 	api.period = period
-	exporter := NewExporter()
+	exporter := newExporter()
 	exporter.api = api
 
 	prometheus.MustRegister(exporter)
 
 	http.Handle(metricPath, prometheus.Handler())
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`<html>
-<head><title>NewRelic exporter</title></head>
-<body>
-<h1>NewRelic exporter</h1>
-<p><a href='` + metricPath + `'>Metrics</a></p>
-</body>
-</html>
-`))
+		w.Write([]byte(`<html>` +
+			`<head><title>NewRelic exporter</title></head>` +
+			`<body>` +
+			`<h1>NewRelic exporter</h1>` +
+			`<p><a href='` + metricPath + `'>Metrics</a></p>` +
+			`</body>` +
+			`</html>`))
 	})
 
 	log.Printf("Listening on %s.", listenAddress)
