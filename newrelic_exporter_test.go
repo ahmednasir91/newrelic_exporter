@@ -10,10 +10,10 @@ import (
 	"time"
 )
 
-var testApiKey string = "205071e37e95bdaa327c62ccd3201da9289ccd17"
-var testApiAppId int = 9045822
-var testTimeout time.Duration = 5 * time.Second
-var testPostData string = "names[]=Datastore%2Fstatement%2FJDBC%2Fmessages%2Finsert&raw=true&summarize=true&period=0&from=0001-01-01T00:00:00Z&to=0001-01-01T00:00:00Z"
+const testAPIKey string = "205071e37e95bdaa327c62ccd3201da9289ccd17"
+const testAPIAppID int = 9045822
+const testTimeout time.Duration = 5 * time.Second
+const testPostData string = "names[]=Datastore%2Fstatement%2FJDBC%2Fmessages%2Finsert&raw=true&summarize=true&period=0&from=0001-01-01T00:00:00Z&to=0001-01-01T00:00:00Z"
 
 func TestAppListGet(t *testing.T) {
 
@@ -24,7 +24,7 @@ func TestAppListGet(t *testing.T) {
 
 	defer ts.Close()
 
-	api := NewNewRelicAPI(ts.URL, testApiKey, testTimeout)
+	api := newNewRelicAPI(ts.URL, testAPIKey, testTimeout)
 	api.client = &http.Client{
 		Timeout: testTimeout,
 		Transport: &http.Transport{
@@ -34,7 +34,7 @@ func TestAppListGet(t *testing.T) {
 		},
 	}
 
-	var app AppList
+	var app appList
 
 	err = app.get(api)
 	if err != nil {
@@ -49,7 +49,7 @@ func TestAppListGet(t *testing.T) {
 
 	switch {
 
-	case a.ID != testApiAppId:
+	case a.ID != testAPIAppID:
 		t.Fatal("Wrong ID")
 
 	case a.Health != "green":
@@ -80,7 +80,7 @@ func TestMetricNamesGet(t *testing.T) {
 
 	defer ts.Close()
 
-	api := NewNewRelicAPI(ts.URL, testApiKey, testTimeout)
+	api := newNewRelicAPI(ts.URL, testAPIKey, testTimeout)
 	api.client = &http.Client{
 		Timeout: testTimeout,
 		Transport: &http.Transport{
@@ -90,9 +90,9 @@ func TestMetricNamesGet(t *testing.T) {
 		},
 	}
 
-	var names MetricNames
+	var names metricNames
 
-	err = names.get(api, testApiAppId)
+	err = names.get(api, testAPIAppID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestMetricValuesGet(t *testing.T) {
 
 	defer ts.Close()
 
-	api := NewNewRelicAPI(ts.URL, testApiKey, testTimeout)
+	api := newNewRelicAPI(ts.URL, testAPIKey, testTimeout)
 	api.client = &http.Client{
 		Timeout: testTimeout,
 		Transport: &http.Transport{
@@ -133,28 +133,28 @@ func TestMetricValuesGet(t *testing.T) {
 		},
 	}
 
-	var data MetricData
-	var names MetricNames
+	var data metricDataResp
+	var names metricNames
 
-	err = names.get(api, testApiAppId)
+	err = names.get(api, testAPIAppID)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = data.get(api, testApiAppId, names)
+	err = data.get(api, testAPIAppID, names)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if len(data.Metric_Data.Metrics) != 1 {
+	if len(data.MetricData.Metrics) != 1 {
 		t.Fatal("Expected 1 metric sets")
 	}
 
-	if len(data.Metric_Data.Metrics[0].Timeslices) != 1 {
+	if len(data.MetricData.Metrics[0].Timeslices) != 1 {
 		t.Fatal("Expected 1 timeslice")
 	}
 
-	appData := data.Metric_Data.Metrics[0].Timeslices[0]
+	appData := data.MetricData.Metrics[0].Timeslices[0]
 
 	if len(appData.Values) != 10 {
 		t.Fatal("Expected 10 data points")
@@ -179,8 +179,8 @@ func TestScrapeAPI(t *testing.T) {
 
 	defer ts.Close()
 
-	exporter := NewExporter()
-	exporter.api = NewNewRelicAPI(ts.URL, testApiKey, testTimeout)
+	exporter := newExporter()
+	exporter.api = newNewRelicAPI(ts.URL, testAPIKey, testTimeout)
 	exporter.api.client = &http.Client{
 		Timeout: testTimeout,
 		Transport: &http.Transport{
@@ -190,9 +190,9 @@ func TestScrapeAPI(t *testing.T) {
 		},
 	}
 
-	var recieved []Metric
+	var recieved []metric
 
-	metrics := make(chan Metric)
+	metrics := make(chan metric)
 
 	go exporter.scrape(metrics)
 
@@ -210,7 +210,7 @@ func testServer() (ts *httptest.Server, err error) {
 
 	ts = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
-		if r.Header.Get("X-Api-Key") != testApiKey {
+		if r.Header.Get("X-Api-Key") != testAPIKey {
 			w.WriteHeader(403)
 		}
 

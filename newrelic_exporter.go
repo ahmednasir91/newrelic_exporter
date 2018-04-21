@@ -136,18 +136,20 @@ func (m *metricNames) get(api *newRelicAPI, appID int) error {
 	return nil
 }
 
+type metricDataResp struct {
+	MetricData metricData `json:"metric_data"`
+}
+
 type metricData struct {
-	metricData struct {
-		Metrics []struct {
-			Name       string
-			Timeslices []struct {
-				Values map[string]interface{}
-			}
+	Metrics []struct {
+		Name       string
+		Timeslices []struct {
+			Values map[string]interface{}
 		}
 	}
 }
 
-func (m *metricData) get(api *newRelicAPI, appID int, names metricNames) error {
+func (m *metricDataResp) get(api *newRelicAPI, appID int, names metricNames) error {
 	path := fmt.Sprintf("/v2/applications/%s/metrics/data.json", strconv.Itoa(appID))
 
 	var nameList []string
@@ -164,11 +166,11 @@ func (m *metricData) get(api *newRelicAPI, appID int, names metricNames) error {
 	// we have to process this in chunks, to ensure the response
 	// fits within a single request.
 
-	chans := make([]chan metricData, 0)
+	chans := make([]chan metricDataResp, 0)
 
 	for i := 0; i < len(nameList); i += ChunkSize {
 
-		chans = append(chans, make(chan metricData))
+		chans = append(chans, make(chan metricDataResp))
 
 		var thisList []string
 
@@ -178,9 +180,9 @@ func (m *metricData) get(api *newRelicAPI, appID int, names metricNames) error {
 			thisList = nameList[i : i+ChunkSize]
 		}
 
-		go func(names []string, ch chan<- metricData) {
+		go func(names []string, ch chan<- metricDataResp) {
 
-			var data metricData
+			var data metricDataResp
 
 			params := url.Values{}
 
@@ -204,7 +206,7 @@ func (m *metricData) get(api *newRelicAPI, appID int, names metricNames) error {
 			dec := json.NewDecoder(bytes.NewReader(body))
 			for {
 
-				page := new(metricData)
+				page := new(metricDataResp)
 				if err := dec.Decode(page); err == io.EOF {
 					break
 				} else if err != nil {
@@ -213,7 +215,7 @@ func (m *metricData) get(api *newRelicAPI, appID int, names metricNames) error {
 					return
 				}
 
-				data.metricData.Metrics = append(data.metricData.Metrics, page.metricData.Metrics...)
+				data.MetricData.Metrics = append(data.MetricData.Metrics, page.MetricData.Metrics...)
 
 			}
 
@@ -224,19 +226,19 @@ func (m *metricData) get(api *newRelicAPI, appID int, names metricNames) error {
 
 	}
 
-	allData := m.metricData.Metrics
+	allData := m.MetricData.Metrics
 
 	for _, ch := range chans {
 		m := <-ch
-		allData = append(allData, m.metricData.Metrics...)
+		allData = append(allData, m.MetricData.Metrics...)
 	}
-	m.metricData.Metrics = allData
+	m.MetricData.Metrics = allData
 
 	return nil
 }
 
-func (m *metricData) sendMetrics(ch chan<- metric, app string) {
-	for _, set := range m.metricData.Metrics {
+func (m *metricDataResp) sendMetrics(ch chan<- metric, app string) {
+	for _, set := range m.MetricData.Metrics {
 
 		if len(set.Timeslices) == 0 {
 			continue
@@ -326,7 +328,7 @@ func (e *exporter) scrape(ch chan<- metric) {
 				e.error.Set(1)
 			}
 
-			var data metricData
+			var data metricDataResp
 
 			err = data.get(api, app.ID, names)
 			if err != nil {
